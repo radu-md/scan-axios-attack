@@ -12,11 +12,13 @@
       1. Compromised axios versions in node_modules
       2. Phantom dependency in lockfiles
       3. Phantom dependency in node_modules (may self-delete after infection)
-      4. RAT artifact on disk  (%ProgramData%\wt.exe)
-      5. Active C2 connections / DNS cache entries
+      4. RAT artifacts on disk (%ProgramData%\wt.exe, %ProgramData%\system.bat, %TEMP%\6202033.ps1)
+      5. Active C2 connections / DNS cache entries (142.11.206.73, 23.254.167.216, port 8000)
       6. Git history containing plain-crypto-js  (requires -Deep)
       7. Compromised axios in global npm/yarn install
       8. Compromised packages in local npm cache
+      9. Registry persistence key (HKCU Run: MicrosoftUpdate)
+     10. SHA256 hash verification of known malicious artifacts
 
     NO changes are made to your system. This script is read-only.
 
@@ -60,14 +62,29 @@ param(
 $BadVersions       = @("1.14.1", "0.30.4")
 $PhantomDep        = "plain-crypto-js"
 $C2IP              = "142.11.206.73"
+$C2IP2             = "23.254.167.216"   # Suspected UNC1069 infrastructure
+$C2Port            = 8000
 $C2Domain          = "sfrclak.com"
 $RatPath           = "$env:PROGRAMDATA\wt.exe"
+$SystemBatPath     = "$env:PROGRAMDATA\system.bat"
 $XorKey            = "OrDeR_7077"
+$PersistRegKey     = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+$PersistRegName    = "MicrosoftUpdate"
 
 $BadSHA1 = @{
     "axios@1.14.1"           = "2553649f2322049666871cea80a5d0d6adc700ca"
     "axios@0.30.4"           = "d6f3f62fd3b9f5432f5782b62d8cfd5247d5ee71"
     "plain-crypto-js@4.2.1"  = "07d889e2dadce6f3910dcbc253317d28ca61c766"
+}
+
+$BadSHA256 = @{
+    "WAVESHAPER.V2-Linux-Python-RAT"  = "fcb81618bb15edfdedfb638b4c08a2af9cac9ecfa551af135a8402bf980375cf"
+    "WAVESHAPER.V2-macOS-Binary"      = "92ff08773995ebc8d55ec4b8e1a225d0d1e51efa4ef88b8849d0071230c9645a"
+    "WAVESHAPER.V2-Windows-Stage1"    = "617b67a8e1210e4fc87c92d1d1da45a2f311c08d26e89b12307cf583c900d101"
+    "WAVESHAPER.V2"                   = "ed8560c1ac7ceb6983ba995124d5917dc1a00288912387a6389296637d5f815c"
+    "SILKBELL-setup.js"               = "e10b1fa84f1d6481625f741b69892780140d4e0e7769e7491e5f4d894c2e0e09"
+    "system.bat"                      = "f7d335205b8d7b20208fb3ef93ee6dc817905dc3ae0c10a0b164f4e7d07121cd"
+    "plain-crypto-js-4.2.1.tgz"       = "58401c195fe0a6204b42f5f90995ece5fab74ce7c69c67a24c61a057325af668"
 }
 
 # Default scan paths if none provided
@@ -114,6 +131,13 @@ function Get-SHA1Hash {
     param([string]$FilePath)
     try {
         return (Get-FileHash -Path $FilePath -Algorithm SHA1 -ErrorAction Stop).Hash.ToLower()
+    } catch { return $null }
+}
+
+function Get-SHA256Hash {
+    param([string]$FilePath)
+    try {
+        return (Get-FileHash -Path $FilePath -Algorithm SHA256 -ErrorAction Stop).Hash.ToLower()
     } catch { return $null }
 }
 
@@ -230,6 +254,18 @@ if (Test-Path $RatPath) {
     Write-Host "  [OK] No RAT artifact found at $RatPath" -ForegroundColor Green
 }
 
+# Persistence batch file
+if (Test-Path $SystemBatPath) {
+    Add-Finding "RAT_ARTIFACT" "CRITICAL" "Persistence batch file found: $SystemBatPath" $SystemBatPath
+} else {
+    Write-Host "  [OK] No system.bat found at $SystemBatPath" -ForegroundColor Green
+}
+
+# Temp dropper payload (6202033.ps1)
+Get-ChildItem -Path $env:TEMP -Filter "6202033*" -ErrorAction SilentlyContinue | ForEach-Object {
+    Add-Finding "RAT_ARTIFACT" "CRITICAL" "Dropper temp payload found in TEMP: $($_.Name)" $_.FullName
+}
+
 # Also scan recursively for any other wt.exe in ProgramData subdirectories (deduped from above)
 Get-ChildItem -Path "$env:PROGRAMDATA" -Recurse -Filter "wt.exe" -ErrorAction SilentlyContinue |
     Where-Object { $_.FullName -ne $RatPath } |
@@ -254,6 +290,25 @@ if ($connections) {
 } else {
     Write-Host "  [OK] No active connections to $C2IP" -ForegroundColor Green
 }
+
+# Second C2 IP (suspected UNC1069 infrastructure)
+$connections2 = Get-NetTCPConnection -ErrorAction SilentlyContinue |
+    Where-Object { $_.RemoteAddress -eq $C2IP2 }
+
+if ($connections2) {
+    foreach ($conn in $connections2) {
+        Add-Finding "C2_CONNECTION" "CRITICAL" "Active connection to C2 $C2IP2`:$($conn.RemotePort) (PID: $($conn.OwningProcess))" ""
+    }
+} else {
+    Write-Host "  [OK] No active connections to $C2IP2" -ForegroundColor Green
+}
+
+# Check for any connection on C2 port 8000 to known C2 hosts
+Get-NetTCPConnection -RemotePort $C2Port -ErrorAction SilentlyContinue |
+    Where-Object { $_.RemoteAddress -match "142\.11\.206\.73|23\.254\.167\.216" } |
+    ForEach-Object {
+        Add-Finding "C2_CONNECTION" "CRITICAL" "Active C2 connection on port $C2Port to $($_.RemoteAddress) (PID: $($_.OwningProcess))" ""
+    }
 
 # DNS cache check
 try {
@@ -350,6 +405,61 @@ Write-Host "  Cache scan complete." -ForegroundColor Green
 Write-Host ""
 
 # ══════════════════════════════════════════════════════════════════════════════
+# CHECK 9: Registry persistence (MicrosoftUpdate Run key)
+# ══════════════════════════════════════════════════════════════════════════════
+Write-Host "═══ CHECK 9: Checking for registry persistence (MicrosoftUpdate) ═══" -ForegroundColor Cyan
+
+try {
+    $regVal = Get-ItemProperty -Path $PersistRegKey -Name $PersistRegName -ErrorAction Stop
+    Add-Finding "PERSISTENCE" "CRITICAL" "Malicious Run key found: $PersistRegName = $($regVal.$PersistRegName)" $PersistRegKey
+} catch {
+    Write-Host "  [OK] No '$PersistRegName' persistence key found in Run registry" -ForegroundColor Green
+}
+Write-Host ""
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHECK 10: SHA256 hash verification of known malicious artifacts on disk
+# ══════════════════════════════════════════════════════════════════════════════
+Write-Host "═══ CHECK 10: SHA256 hash verification of malicious artifacts ═══" -ForegroundColor Cyan
+
+$artifactPaths = @(
+    $RatPath,
+    $SystemBatPath,
+    (Join-Path $env:TEMP "6202033.ps1")
+)
+
+foreach ($artifactPath in $artifactPaths) {
+    if (Test-Path $artifactPath) {
+        $hash = Get-SHA256Hash $artifactPath
+        if ($hash) {
+            $match = $BadSHA256.GetEnumerator() | Where-Object { $_.Value -eq $hash } | Select-Object -First 1
+            if ($match) {
+                Add-Finding "SHA256_MATCH" "CRITICAL" "File matches known malicious SHA256 [$($match.Key)]: $hash" $artifactPath
+            } else {
+                Write-Host "  [INFO] File exists but SHA256 does not match known IOCs: $artifactPath" -ForegroundColor Cyan
+            }
+        }
+    }
+}
+
+# Also scan npm cache tarballs against SHA256 IOCs
+if (Test-Path $npmCachePath) {
+    Get-ChildItem -Path $npmCachePath -Recurse -Filter "*.tgz" -ErrorAction SilentlyContinue |
+        ForEach-Object {
+            $hash = Get-SHA256Hash $_.FullName
+            if ($hash) {
+                $match = $BadSHA256.GetEnumerator() | Where-Object { $_.Value -eq $hash } | Select-Object -First 1
+                if ($match) {
+                    Add-Finding "SHA256_MATCH" "CRITICAL" "Tarball SHA256 matches known-bad artifact [$($match.Key)]" $_.FullName
+                }
+            }
+        }
+}
+
+Write-Host "  SHA256 verification complete." -ForegroundColor Green
+Write-Host ""
+
+# ══════════════════════════════════════════════════════════════════════════════
 # SUMMARY
 # ══════════════════════════════════════════════════════════════════════════════
 Write-Host "╔══════════════════════════════════════════════════════════════════╗" -ForegroundColor White
@@ -370,7 +480,7 @@ if ($criticals.Count -gt 0) {
     Write-Host "  2. Rotate ALL credentials (npm tokens, SSH keys, API keys, cloud creds)" -ForegroundColor Yellow
     Write-Host "  3. Rotate all database passwords" -ForegroundColor Yellow
     Write-Host "  4. Check CI/CD pipelines for affected installs" -ForegroundColor Yellow
-    Write-Host "  5. Block C2: sfrclak.com and 142.11.206.73 at your firewall" -ForegroundColor Yellow
+    Write-Host "  5. Block C2: sfrclak.com, 142.11.206.73 and 23.254.167.216 at your firewall" -ForegroundColor Yellow
     Write-Host "  6. Rebuild from a clean image if possible" -ForegroundColor Yellow
     Write-Host "  7. Audit git history for unauthorized changes" -ForegroundColor Yellow
 } elseif ($warnings.Count -gt 0) {
