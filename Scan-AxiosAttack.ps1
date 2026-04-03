@@ -165,9 +165,9 @@ function Add-Finding {
 # ── Banner ─────────────────────────────────────────────────────────────────────
 Write-Host ""
 Write-Host "╔══════════════════════════════════════════════════════════════════╗" -ForegroundColor Red
-Write-Host "║        AXIOS SUPPLY CHAIN ATTACK SCANNER (2026-03-31)          ║" -ForegroundColor Red
-Write-Host "║  Compromised: axios@1.14.1 / axios@0.30.4                     ║" -ForegroundColor Red
-Write-Host "║  Threat: UNC1069 — WAVESHAPER.V2 RAT                          ║" -ForegroundColor Red
+Write-Host "║        AXIOS SUPPLY CHAIN ATTACK SCANNER (2026-03-31)            ║" -ForegroundColor Red
+Write-Host "║  Compromised: axios@1.14.1 / axios@0.30.4                        ║" -ForegroundColor Red
+Write-Host "║  Threat: UNC1069 — WAVESHAPER.V2 RAT                             ║" -ForegroundColor Red
 Write-Host "╚══════════════════════════════════════════════════════════════════╝" -ForegroundColor Red
 Write-Host ""
 Write-Host "  Scanning $($ScanPaths.Count) path(s):" -ForegroundColor DarkGray
@@ -463,7 +463,7 @@ Write-Host ""
 # SUMMARY
 # ══════════════════════════════════════════════════════════════════════════════
 Write-Host "╔══════════════════════════════════════════════════════════════════╗" -ForegroundColor White
-Write-Host "║                         SCAN SUMMARY                           ║" -ForegroundColor White
+Write-Host "║                         SCAN SUMMARY                             ║" -ForegroundColor White
 Write-Host "╚══════════════════════════════════════════════════════════════════╝" -ForegroundColor White
 
 $criticals = $findings | Where-Object { $_.Severity -eq "CRITICAL" }
