@@ -1,6 +1,6 @@
 # Scan-AxiosAttack
 
-> **PowerShell scanner for the axios npm supply chain attack (2026-03-31) — Windows**
+> **PowerShell scanner for the axios npm supply chain attack (2026-03) — Windows**
 
 On March 2026, two axios versions were quietly backdoored on npm by the [**UNC1069** threat actor](https://cloud.google.com/blog/topics/threat-intelligence/north-korea-threat-actor-targets-axios-npm-package). Anyone who ran `npm install` with `axios@1.14.1` or `axios@0.30.4` in range may have a remote-access trojan installed on their machine.
 
